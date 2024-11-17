@@ -21,7 +21,7 @@ use function is_array;
 use function is_numeric;
 use function sprintf;
 
-final class RendererFactory
+class RendererFactory
 {
     public function __invoke(ContainerInterface $container): LaminasViewRenderer
     {
