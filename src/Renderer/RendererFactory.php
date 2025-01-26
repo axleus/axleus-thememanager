@@ -2,21 +2,22 @@
 
 declare(strict_types=1);
 
-namespace Axleus\ThemeManager;
+namespace Axleus\ThemeManager\Renderer;
 
+use Axleus\Htmx\ConfigProvider as HtmxProvider;
+use Axleus\ThemeManager\ConfigProvider;
 use Laminas\View\HelperPluginManager;
 use Laminas\View\Renderer\PhpRenderer;
 use Laminas\View\Resolver;
+use Mezzio\Helper\UrlHelperInterface;
 use Mezzio\Helper\ServerUrlHelper as BaseServerUrlHelper;
 use Mezzio\Helper\UrlHelper as BaseUrlHelper;
 use Mezzio\LaminasView\Exception;
-use Mezzio\LaminasView\LaminasViewRenderer;
 use Mezzio\LaminasView\ServerUrlHelper;
 use Mezzio\LaminasView\UrlHelper;
-use Psr\Container\ContainerExceptionInterface;
 use Psr\Container\ContainerInterface;
-use Psr\Container\NotFoundExceptionInterface;
 
+use function assert;
 use function is_array;
 use function is_numeric;
 use function sprintf;
@@ -25,9 +26,34 @@ class RendererFactory
 {
     public function __invoke(ContainerInterface $container): Renderer
     {
-        /** @var array<string, string[]> */
-        $config    = $container->has('config') ? $container->get('config') : [];
-        $themeData = $config[ConfigProvider::APP_SETTINGS_KEY][ConfigProvider::THEME_CONFIG_KEY][ConfigProvider::THEME_CONFIG_KEY];
+        $config     = $container->has('config') ? $container->get('config') : [];
+        $htmxConfig = $config[HtmxProvider::class] ?? [];
+        $themeData  = $config[ConfigProvider::class][ConfigProvider::THEME_CONFIG_KEY];
+        $config     = $config['templates'] ?? [];
+
+        $resolver = new Resolver\AggregateResolver();
+        $resolver->attach(
+            new Resolver\TemplateMapResolver($config['map'] ?? []),
+            100
+        );
+
+        // Create or retrieve the renderer from the container
+        $renderer = $container->has(PhpRenderer::class) ? $container->get(PhpRenderer::class) : new PhpRenderer();
+        assert($renderer instanceof PhpRenderer);
+
+        $renderer->setResolver($resolver);
+
+        // Inject helpers
+        $this->injectHelpers($renderer, $container);
+
+        $defaultSuffix = $config['extension'] ?? $config['default_suffix'] ?? null;
+        // Inject renderer
+        $view = new Renderer(
+            renderer: $renderer,
+            layout: $config['layout'] ?? null,
+            defaultSuffix: $defaultSuffix,
+            enableHtmx: $htmxConfig['enable'] ?? null
+        );
 
         $activeTheme = null;
 
@@ -44,48 +70,20 @@ class RendererFactory
             $activeTheme = ConfigProvider::DEFAULT_THEME;
         }
 
-        /** @var array<string, string[]> */
-        $config = $config['templates'] ?? [];
-
-        // Configuration
-        $resolver = new Resolver\AggregateResolver();
-        $resolver->attach(
-            new Resolver\TemplateMapResolver($config['map'] ?? []),
-            100
-        );
-
-        // Create or retrieve the renderer from the container
-        /** @var PhpRenderer */
-        $renderer = $container->has(PhpRenderer::class)
-            ? $container->get(PhpRenderer::class)
-            : ($container->has('Zend\View\Renderer\PhpRenderer')
-                ? $container->get('Zend\View\Renderer\PhpRenderer')
-                : new PhpRenderer());
-        $renderer->setResolver($resolver);
-
-        // Inject helpers
-        $this->injectHelpers($renderer, $container);
-        /** @var string */
-        $defaultSuffix = $config['extension'] ?? $config['default_suffix'] ?? null;
-        // Inject renderer
-        /** @var string|null */
-        $layout = $config['layout'] ?? null;
-        $view = new LaminasViewRenderer($renderer, $layout, $defaultSuffix);
-
         // Add template paths
-        /** @var array<string, string[]> */
-        $allPaths = isset($config['paths']) && $config['paths'] !== [] ? $config['paths'] : [];
+        $allPaths = isset($config['paths']) && is_array($config['paths']) ? $config['paths'] : [];
         foreach ($allPaths as $namespace => $paths) {
             $namespace = is_numeric($namespace) ? null : $namespace;
             foreach ((array) $paths as $path) {
-                switch(true) {
-                    case $activeTheme === ConfigProvider::DEFAULT_THEME:
-                        $view->addPath($path . '/' . ConfigProvider::DEFAULT_THEME, $namespace);
-                        break;
-                    default:
-                        $view->addPath($path . '/' . ConfigProvider::DEFAULT_THEME, $namespace);
-                        $view->addPath($path . '/' . $activeTheme, $namespace);
-                    break;
+                // support default mezzio template paths
+                $view->addPath($path, $namespace);
+                if ($activeTheme === ConfigProvider::DEFAULT_THEME) {
+                    // if the default theme is the active theme this is the only path we need
+                    $view->addPath($path . '/' . ConfigProvider::DEFAULT_THEME, $namespace);
+                } else {
+                    // support loading from the default as a fallback
+                    $view->addPath($path . '/' . ConfigProvider::DEFAULT_THEME, $namespace);
+                    $view->addPath($path . '/' . $activeTheme, $namespace);
                 }
             }
         }
@@ -93,7 +91,7 @@ class RendererFactory
         return $view;
     }
 
-    /**
+        /**
      * Inject helpers into the PhpRenderer instance.
      *
      * If a HelperPluginManager instance is present in the container, uses that;
@@ -118,14 +116,13 @@ class RendererFactory
                     BaseUrlHelper::class
                 ));
             }
-            /** @var BaseUrlHelper */
-            $baseUrlHelper = $container->get(BaseUrlHelper::class);
-            return new UrlHelper($baseUrlHelper);
-            // return new UrlHelper(
-            //     $container->has(BaseUrlHelper::class)
-            //         ? $container->get(BaseUrlHelper::class)
-            //         : $container->get('Zend\Expressive\Helper\UrlHelper')
-            // );
+            $helper = $container->has(BaseUrlHelper::class)
+                ? $container->get(BaseUrlHelper::class)
+                : $container->get('Zend\Expressive\Helper\UrlHelper');
+
+            assert($helper instanceof UrlHelperInterface);
+
+            return new UrlHelper($helper);
         });
 
         $helpers->setAlias('serverurl', BaseServerUrlHelper::class);
@@ -141,32 +138,26 @@ class RendererFactory
                     BaseServerUrlHelper::class
                 ));
             }
-            /** @var BaseServerUrlHelper */
-            $baseUrlHelper = $container->has(BaseServerUrlHelper::class);
-            return new ServerUrlHelper($baseUrlHelper);
-            // return new ServerUrlHelper(
-            //     $container->has(BaseServerUrlHelper::class)
-            //         ? $container->get(BaseServerUrlHelper::class)
-            //         : $container->get('Zend\Expressive\Helper\ServerUrlHelper')
-            // );
+
+            $helper = $container->has(BaseServerUrlHelper::class)
+                ? $container->get(BaseServerUrlHelper::class)
+                : $container->get('Zend\Expressive\Helper\ServerUrlHelper');
+            assert($helper instanceof BaseServerUrlHelper);
+
+            return new ServerUrlHelper($helper);
         });
 
         $renderer->setHelperPluginManager($helpers);
     }
 
-    /**
-     *
-     * @param ContainerInterface $container
-     * @return HelperPluginManager
-     * @throws NotFoundExceptionInterface
-     * @throws ContainerExceptionInterface
-     */
     private function retrieveHelperManager(ContainerInterface $container): HelperPluginManager
     {
         if ($container->has(HelperPluginManager::class)) {
-            /** @var HelperPluginManager */
-            $manager = $container->get(HelperPluginManager::class);
-            return $manager;
+            return $container->get(HelperPluginManager::class);
+        }
+
+        if ($container->has('Zend\View\HelperPluginManager')) {
+            return $container->get('Zend\View\HelperPluginManager');
         }
 
         return new HelperPluginManager($container);

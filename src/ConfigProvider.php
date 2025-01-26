@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace Axleus\ThemeManager;
 
+use Axleus\Core\ConfigProviderInterface;
 use Mezzio\LaminasView\LaminasViewRenderer;
 
-final class ConfigProvider
+final class ConfigProvider implements ConfigProviderInterface
 {
-    public const APP_SETTINGS_KEY = 'app_settings';
     public const DEFAULT_THEME    = 'default';
     public const THEME_CONFIG_KEY = 'themes';
 
@@ -16,29 +16,25 @@ final class ConfigProvider
     {
         return [
             'dependencies' => $this->getDependencies(),
-            static::APP_SETTINGS_KEY => $this->getAppSettings(),
+            static::class  => $this->getAxleusConfig(),
+            'view_helpers' => $this->getViewHelpers(),
         ];
     }
 
-    public function getAppSettings(): array
+    public function getAxleusConfig(): array
     {
         return [
-            static::class => [
-                'themes' => [
-                    static::DEFAULT_THEME => [
-                        'id'       => 1,
-                        'active'   => false,
-                        'name'     => 'default',
-                        'fallback' => 'default',
-                        // 'resource_map' => [
-                        //     'css/style.css'              => 'theme/default/css/style.css',
-                        //     'css/bootstrap.css'          => 'theme/default/css/bootstrap.css',
-                        //     'css/bootstrap.min.css'      => 'theme/default/css/bootstrap.min.css',
-                        //     'js/bootstrap.js'            => 'theme/default/js/bootstrap.js',
-                        //     'js/bootstrap.min.js'        => 'theme/default/js/bootstrap.min.js',
-                        //     'img/favicon.ico'            => 'theme/default/img/favicon.ico',
-                        //     'img/webinertia-logo-75.png' => 'theme/default/img/webinertia-logo-75.png',
-                        // ],
+            static::THEME_CONFIG_KEY => [
+                static::DEFAULT_THEME => [
+                    'id'        => 1,
+                    'active'    => false,
+                    'name'      => 'default',
+                    'fallback'  => 'default',
+                    'bsTheme'   => 'dark',
+                    'assetMap' => [
+                        'image'      => 'themes/%s/img/%s',
+                        'stylesheet' => 'themes/%s/css/%s',
+                        'script'     => 'themes/%s/js/%s',
                     ],
                 ],
             ],
@@ -48,8 +44,11 @@ final class ConfigProvider
     public function getDependencies(): array
     {
         return [
+            // 'aliases' => [
+            //     LaminasViewRenderer::class => Renderer\Renderer::class,
+            // ],
             'factories' => [
-                LaminasViewRenderer::class => RendererFactory::class,
+                LaminasViewRenderer::class => Renderer\RendererFactory::class,
             ],
         ];
     }
@@ -59,6 +58,19 @@ final class ConfigProvider
         return [
             'paths' => [
                 'theme-manager' => [__DIR__ . '/../templates/'],
+            ],
+        ];
+    }
+
+    public function getViewHelpers(): array
+    {
+        return [
+            'aliases' => [
+                'theme'       => Helper\ThemeHelper::class,
+                'themeHelper' => Helper\ThemeHelper::class,
+            ],
+            'factories' => [
+                Helper\ThemeHelper::class => Helper\ThemeHelperFactory::class,
             ],
         ];
     }
