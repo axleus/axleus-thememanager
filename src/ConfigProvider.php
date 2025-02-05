@@ -15,9 +15,12 @@ final class ConfigProvider implements ConfigProviderInterface
     public function __invoke(): array
     {
         return [
-            'dependencies' => $this->getDependencies(),
-            static::class  => $this->getAxleusConfig(),
-            'view_helpers' => $this->getViewHelpers(),
+            'dependencies'       => $this->getDependencies(),
+            static::class        => $this->getAxleusConfig(),
+            'view_helpers'       => $this->getViewHelpers(),
+            'view_helper_config' => $this->getViewHelperConfig(),
+            'view_manager'       => $this->getViewManagerConfig(),
+            'templates'          => $this->getTemplates(),
         ];
     }
 
@@ -56,9 +59,20 @@ final class ConfigProvider implements ConfigProviderInterface
     public function getTemplates(): array
     {
         return [
-            'paths' => [
-                'theme-manager' => [__DIR__ . '/../templates/'],
-            ],
+            'layout' => 'layout::layout',
+            'header' => 'layout::header',
+            'body'   => 'layout::body',
+            'footer' => 'layout::footer',
+            // 'paths' => [
+            //     'theme-manager' => [__DIR__ . '/../templates/'],
+            // ],
+        ];
+    }
+
+    public function getViewHelperConfig(): array
+    {
+        return [
+            'doctype' => 'HTML5',
         ];
     }
 
@@ -72,6 +86,13 @@ final class ConfigProvider implements ConfigProviderInterface
             'factories' => [
                 Helper\ThemeHelper::class => Helper\ThemeHelperFactory::class,
             ],
+        ];
+    }
+
+    public function getViewManagerConfig(): array
+    {
+        return [
+            'base_path' => '/',
         ];
     }
 }
